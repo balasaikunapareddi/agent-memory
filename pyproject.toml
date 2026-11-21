@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-memory"
+version = "0.1.0"
+description = "Support agent with real memory — session memory, long-term memory across restarts, learned preferences, and context compaction. Mock mode runs fully offline; live mode uses CrewAI + Gemini."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [{ name = "Bala Sai Kunapareddi" }]
+dependencies = []
+
+[project.optional-dependencies]
+live = ["crewai>=0.80"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+agent-memory-demo = "agent_memory.demo:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
