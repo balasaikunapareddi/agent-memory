@@ -66,7 +66,13 @@ export GEMINI_API_KEY=...   # your key, from the environment
 
 Live mode builds a CrewAI agent (`build_crewai_agent`) with the same
 three memory tools and a Gemini LLM. Everything else — store,
-extraction, compaction — is identical.
+extraction, compaction — is identical. Live mode is verified against
+the Gemini free tier (`gemini-3.5-flash-lite`, overridable via
+`GEMINI_MODEL`): the agent stored an order number and email via
+`remember_fact`, and a fresh crew recalled both via `recall_facts`
+without being re-told. Live testing also caught a real bug: CrewAI
+runs tools on worker threads, so the SQLite store now opens with
+`check_same_thread=False` behind a lock (regression-tested).
 
 ## Why CrewAI
 

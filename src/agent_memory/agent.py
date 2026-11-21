@@ -228,7 +228,7 @@ def build_crewai_agent(store: MemoryStore, user_id: str):
         """Delete one stored fact about the user."""
         return tools["forget_fact"](user_id=user_id, key=key)
 
-    llm = LLM(model="gemini/gemini-2.0-flash", api_key=os.environ["GEMINI_API_KEY"])
+    llm = LLM(model=f"gemini/{os.environ.get('GEMINI_MODEL', 'gemini-3.5-flash-lite')}", api_key=os.environ["GEMINI_API_KEY"])
     return Agent(
         role="Support agent with long-term memory",
         goal="Help the user without ever making them repeat themselves",

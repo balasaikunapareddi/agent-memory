@@ -66,3 +66,24 @@ def test_persistence_across_instances(store_path):
     assert second.get_preferences("u1") == {"contact_channel": "email"}
     assert second.get_turns("s1") == [{"role": "user", "content": "hello"}]
     second.close()
+
+
+def test_store_usable_from_another_thread(store):
+    """Agent frameworks run tools on worker threads; the store must too."""
+    import threading
+
+    errors = []
+
+    def write_and_read():
+        try:
+            store.remember_fact("u1", "order_number", "ORD-7781")
+            assert store.recall_facts("u1")["order_number"] == "ORD-7781"
+        except Exception as exc:  # noqa: BLE001 - surface thread failures
+            errors.append(exc)
+
+    t = threading.Thread(target=write_and_read)
+    t.start()
+    t.join(timeout=10)
+    assert not t.is_alive()
+    assert errors == []
+    assert store.recall_facts("u1")["order_number"] == "ORD-7781"
