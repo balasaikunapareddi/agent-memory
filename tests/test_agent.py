@@ -1,6 +1,7 @@
 """End-to-end agent behavior: the demo path, tools, forget."""
 
-from agent_memory.agent import SYSTEM_PROMPT, MemoryAgent
+from agent_memory.agent import MemoryAgent
+from agent_memory.prompts import SYSTEM_PROMPT
 from agent_memory.store import MemoryStore
 from agent_memory.tools import build_tools
 

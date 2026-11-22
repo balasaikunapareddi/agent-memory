@@ -1,11 +1,15 @@
 """The memory agent.
 
-Behavior lives in the system prompt; mechanics live in code. The
-agent loop is the same in both modes: the model decides tool calls,
-the loop executes them against the memory tools, and the model
-composes the reply. In mock mode the "model" is a small deterministic
-script (no key, no network); in live mode a CrewAI agent with a
-Gemini LLM drives the same tools.
+Behavior lives in the system prompt (``prompts.py``); mechanics live
+in code. The agent loop is the same in both modes: the model decides
+tool calls, the loop executes them against the memory tools, and the
+model composes the reply. In mock mode the "model" is a small
+deterministic script (no key, no network); in live mode a CrewAI
+agent with a Gemini LLM drives the same tools.
+
+``MemoryAgent`` below is the agent: ``chat``/``run`` is one turn
+through the loop, ``run_loop`` is the loop itself (model decides
+tool calls -> tools execute -> reply is composed).
 """
 
 from __future__ import annotations
@@ -16,21 +20,9 @@ import uuid
 
 from .compaction import CompactionEvent, Compactor
 from .preferences import extract_preferences
+from .prompts import LIVE_AGENT_GOAL, LIVE_AGENT_ROLE, SYSTEM_PROMPT
 from .store import MemoryStore
 from .tools import build_tools
-
-SYSTEM_PROMPT = """You are a support agent with a memory.
-
-- When the user tells you something worth keeping (an issue they are
-  having, a detail about their setup), store it with remember_fact.
-- Before answering a follow-up, check recall_facts — never make the
-  user re-explain something they already told you.
-- Apply the user's stored preferences (contact channel, timezone,
-  preferred name) without being asked again.
-- If the user asks you to forget something, use forget_fact.
-- Be brief and concrete. Reference what you remember naturally, the
-  way a good support rep who has read the ticket history would.
-"""
 
 _ISSUE_HINTS = re.compile(
     r"\b(issue|problem|broken|not working|drops?|error|fails?|outage|down)\b",
@@ -44,11 +36,25 @@ _FORGET_HINTS = re.compile(r"\bforget\b.*\b(issue|problem|that)\b", re.IGNORECAS
 
 
 class MemoryAgent:
-    """One agent instance = one session for one user.
+    """Support agent with session + long-term memory.
 
-    A restart is just a new MemoryAgent over the same store file —
-    that is the whole point: long-term memory lives in the store,
-    not in the process.
+    One agent instance = one session for one user. A restart is just
+    a new MemoryAgent over the same store file — that is the whole
+    point: long-term memory lives in the store, not in the process.
+
+    The agent loop, per turn (``chat`` / ``run``):
+      1. record the user turn and extract stated preferences by rule;
+      2. ``run_loop``: the model (deterministic script in mock mode,
+         CrewAI + Gemini in live mode) decides tool calls, the loop
+         executes them against the memory tools, and the reply is
+         composed from the tool results + stored preferences;
+      3. record the reply and compact the history if over budget.
+
+    Config: ``store`` (SQLite long-term memory), ``user_id``,
+    ``session_id``, ``token_budget`` (compaction trigger). Tools:
+    ``remember_fact`` / ``recall_facts`` / ``forget_fact`` from
+    ``build_tools(store)``. Prompt: ``SYSTEM_PROMPT`` from
+    ``prompts.py``, held as ``self.system_prompt``.
     """
 
     def __init__(
@@ -58,14 +64,18 @@ class MemoryAgent:
         session_id: str | None = None,
         token_budget: int = 400,
     ):
+        # Config
         self.store = store
         self.user_id = user_id
         self.session_id = session_id or f"session-{uuid.uuid4().hex[:8]}"
+        self.token_budget = token_budget
+        # Prompt (from prompts.py) and tools the loop can call
+        self.system_prompt = SYSTEM_PROMPT
         self.tools = build_tools(store)
+        # Mechanics: compaction + session bookkeeping
         self.compactor = Compactor(budget_tokens=token_budget)
         self.turns: list[dict[str, str]] = store.get_turns(self.session_id)
         self.compaction_events: list[CompactionEvent] = []
-        self.system_prompt = SYSTEM_PROMPT
 
     # -- public API ----------------------------------------------------
 
@@ -78,10 +88,14 @@ class MemoryAgent:
         for key, value in extract_preferences(message).items():
             self.store.set_preference(self.user_id, key, value)
 
-        reply = self._run_loop(message)
+        reply = self.run_loop(message)
         self._append("assistant", reply)
         self._maybe_compact()
         return reply
+
+    def run(self, message: str) -> str:
+        """Run one turn through the agent loop. Alias for ``chat``."""
+        return self.chat(message)
 
     def remembered(self) -> dict[str, dict[str, str]]:
         """Everything the agent currently knows about this user."""
@@ -92,13 +106,16 @@ class MemoryAgent:
 
     # -- agent loop ----------------------------------------------------
 
-    def _run_loop(self, message: str) -> str:
-        """Model decides tool calls; the loop runs them; model replies."""
+    def run_loop(self, message: str) -> str:
+        """The agent loop: model decides tool calls; loop runs them; model replies."""
         tool_calls = self._scripted_model(message)
         results: dict[str, object] = {}
         for name, kwargs in tool_calls[:3]:  # bounded loop
             results[name] = self.tools[name](**kwargs)
         return self._compose_reply(message, results)
+
+    # Backwards-compatible private alias for the loop.
+    _run_loop = run_loop
 
     def _scripted_model(self, message: str) -> list[tuple[str, dict]]:
         """The mock model: deterministic intent -> tool calls."""
@@ -230,8 +247,8 @@ def build_crewai_agent(store: MemoryStore, user_id: str):
 
     llm = LLM(model=f"gemini/{os.environ.get('GEMINI_MODEL', 'gemini-3.5-flash-lite')}", api_key=os.environ["GEMINI_API_KEY"])
     return Agent(
-        role="Support agent with long-term memory",
-        goal="Help the user without ever making them repeat themselves",
+        role=LIVE_AGENT_ROLE,
+        goal=LIVE_AGENT_GOAL,
         backstory=SYSTEM_PROMPT,
         tools=[remember_fact, recall_facts, forget_fact],
         llm=llm,

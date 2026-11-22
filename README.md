@@ -107,11 +107,12 @@ point: everything this project is *about* (memory, preferences,
 compaction) is real and tested offline; only the language
 understanding is stubbed.
 
-## Layout
+## Project structure
 
 ```
 src/agent_memory/
-  agent.py        system prompt, agent loop, CrewAI live builder
+  prompts.py      system prompt + live-agent instruction prompts (all prompt text)
+  agent.py        MemoryAgent: agent loop (chat/run, run_loop), CrewAI live builder
   store.py        SQLite long-term memory (facts, preferences, turns)
   tools.py        typed remember/recall/forget tools
   preferences.py  deterministic preference extraction rules
